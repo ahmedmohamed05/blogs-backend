@@ -1,0 +1,97 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                 Int                 @id @default(autoincrement())
+  username           String              @unique
+  email              String              @unique
+  isVerified         Boolean             @default(false)
+  hashedPassword     String
+  firstName          String
+  lastName           String
+  createAt           DateTime            @default(now())
+  posts              Post[]
+  comments           Comment[]
+  likes              Likes[]
+  validRefreshTokens ValidRefreshToken[]
+  otps               Otp[]
+
+  @@index([username])
+  @@map("users")
+}
+
+model Otp {
+  id        Int      @id @default(autoincrement())
+  otp       String
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  // purpose   OtpPurpose
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  isUsed    Boolean  @default(false)
+
+  @@index([otp, userId])
+  @@map("otps")
+}
+
+model Post {
+  id        Int       @id @default(autoincrement())
+  title     String    @db.VarChar(255)
+  content   String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @default(now()) @updatedAt
+  usersId   Int
+  user      User      @relation(fields: [usersId], references: [id])
+  tags      Tag[]
+  comments  Comment[]
+  likes     Likes[]
+
+  @@map("posts")
+}
+
+model Tag {
+  id    Int    @id @default(autoincrement())
+  name  String @unique
+  posts Post[]
+
+  @@map("tags")
+}
+
+model Comment {
+  id     Int    @id @default(autoincrement())
+  text   String
+  postId Int
+  post   Post   @relation(fields: [postId], references: [id])
+  userId Int
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@map("comments")
+}
+
+model Likes {
+  id Int @id @default(autoincrement())
+
+  userId Int
+  postId Int
+
+  user User @relation(fields: [userId], references: [id])
+  post Post @relation(fields: [postId], references: [id])
+
+  @@unique([userId, postId]) // Prevent duplicates (User can't like the post twice)
+  @@map("posts_likes")
+}
+
+model ValidRefreshToken {
+  id     Int    @id @default(autoincrement())
+  token  String @unique
+  userId Int
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@map("valid_refresh_tokens")
+}
