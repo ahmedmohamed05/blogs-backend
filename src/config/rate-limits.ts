@@ -9,9 +9,9 @@ export const REGISTER_RATE_LIMITER = rateLimit({
 	legacyHeaders: false,
 	handler: (req, res) => {
 		res.status(429).json({
-			error: "Too many login attempts",
-			retryAfter: 15 * 60, // seconds
-			message: "Please try again after 15 minutes",
+			error: "Too many registration attempts",
+			retryAfter: 60 * 60, // seconds
+			message: "Please try again after 1 hour",
 		});
 	},
 });

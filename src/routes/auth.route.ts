@@ -1,9 +1,6 @@
 import { Router } from "express";
 import AuthController from "../controllers/auth.controller";
-import {
-	verifyAccessCookie,
-	verifyRefreshCookie,
-} from "../middlewares/verify-cookies.middleware";
+import { verifyRefreshCookie } from "../middlewares/verify-cookies.middleware";
 import validateRequestSchema from "../middlewares/validate.middleware";
 import RequestSchemas from "../schemas/auth.schema";
 import {
@@ -15,7 +12,7 @@ const authRouter = Router();
 // POST /api/auth/register create not verified user and send and OTP
 authRouter.post(
 	"/register",
-	REGISTER_RATE_LIMITER,
+	// REGISTER_RATE_LIMITER,
 	validateRequestSchema(RequestSchemas.register),
 	AuthController.register
 );
@@ -30,7 +27,7 @@ authRouter.post(
 // POST /api/auth/login login a user only if he/she verified via username & password
 authRouter.post(
 	"/login",
-	LOGIN_RATE_LIMITER,
+	// LOGIN_RATE_LIMITER,
 	validateRequestSchema(RequestSchemas.login),
 	AuthController.login
 );
@@ -51,16 +48,27 @@ authRouter.post(
 );
 
 authRouter.post(
-	"/changePassword",
+	"/change-password",
 	validateRequestSchema(RequestSchemas.changePassword),
 	AuthController.changePassword
 );
 
 // authRouter.post(
-// 	"/reset-password/verify-otp",
-// 	validateRequestSchema(RequestSchemas.accessCookie, "cookies"),
-// 	verifyAccessCookie,
-// 	AuthController.passwordResetVerify
+// 	"/send-otp",
+// 	validateRequestSchema(RequestSchemas.sendOTP),
+// 	AuthController.sendOTP
 // );
+
+authRouter.post(
+	"/forgot-password",
+	validateRequestSchema(RequestSchemas.forgotPassword),
+	AuthController.forgotPassword
+);
+
+authRouter.post(
+	"/reset-password",
+	validateRequestSchema(RequestSchemas.resetPassword),
+	AuthController.resetPassword
+);
 
 export default authRouter;

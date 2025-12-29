@@ -1,6 +1,6 @@
 # API Documentation
 
-Base URL: `http://localhost:3000/api` (Default development URL)
+Base URL: `http://localhost:8080/api` (Default development URL)
 
 ## Authentication Endpoints
 
@@ -18,14 +18,14 @@ Creates a new user account. The account is created as "unverified". An OTP is se
     "lastName": "Doe",
     "email": "john.doe@example.com",
     "username": "johndoe",
-    "password": "securepassword123" // Minimum 6 characters
+    "password": "SecurePassword123!" // Min 6 chars, 1 upper, 1 lower, 1 number, 1 special
   }
   ```
 - **Response (200 OK)**:
   ```json
   {
     "expiresAt": "2023-10-27T10:00:00.000Z",
-    "message": "We sent you a mil with your OTP"
+    "message": "We sent you a mail with your OTP"
   }
   ```
 
@@ -60,17 +60,14 @@ Authenticates a user.
   - **Body**:
     ```json
     {
-      "message": "We sent you a mil with your OTP"
+      "message": "We sent you a mail with your OTP"
     }
     ```
 
-### 3. Verify OTP (Login via OTP)
-Verifies the OTP sent to the user's email. This endpoint is used for:
-1. Verifying a new account after registration.
-2. Completing a login for unverified accounts.
-3. **Email & OTP Login**: Logging in directly if you have a valid OTP (and bypass password if implemented/used as 2FA).
+### 3. Verify Account
+Verifies the created account using the OTP sent to the email.
 
-- **Endpoint**: `POST /verify-otp`
+- **Endpoint**: `POST /verify-account`
 - **Request Body**:
   ```json
   {
@@ -80,24 +77,34 @@ Verifies the OTP sent to the user's email. This endpoint is used for:
   ```
 - **Response (200 OK)**:
   - **Cookies**: Sets `accessToken` and `refreshToken`.
-  - **Body**: User Information.
+  - **Body**: User Information (excluding sensitive data).
     ```json
     {
-      "id": "uuid...",
+      "id": 1,
       "firstName": "John",
+      "lastName": "Doe",
+      "email": "john.doe@example.com",
+      "username": "johndoe",
+      "isVerified": true,
       ...
     }
     ```
 
-### 4. Send OTP
-Request a new OTP to be sent to the user's email.
+### 4. Change Password
+Allows a user to change their password by providing the current one.
 
-> **Note**: This endpoint currently requires an `accessToken` (via cookie), implying it is for authenticated users (e.g., re-verification) rather than a public "Forgot Password" or "Magic Link" flow.
-
-- **Endpoint**: `POST /send-otp`
-- **Request Headers/Cookies**: Requires `accessToken` cookie.
-- **Body**: (Empty or implied by token user context)
-- **Response**: (Subject to implementation - currently pending)
+- **Endpoint**: `POST /changePassword`
+- **Request Body**:
+  ```json
+  {
+    "username": "johndoe",
+    "currentPassword": "oldpassword123",
+    "newPassword": "newpassword123"
+  }
+  ```
+- **Response (200 OK)**:
+  - **Cookies**: Updates `accessToken` and `refreshToken`.
+  - **Body**: User Information.
 
 ### 5. Refresh Token
 Generates new access and refresh tokens using a valid refresh token.
@@ -114,6 +121,62 @@ Invalidates the refresh token and clears auth cookies.
 - **Request Headers/Cookies**: Requires `refreshToken` cookie.
 - **Response (200 OK)**: OK status.
 
+### 7. Resend OTP
+Resends an OTP to the user's email.
+
+- **Endpoint**: `POST /send-otp`
+- **Request Body**:
+  ```json
+  {
+    "email": "john.doe@example.com",
+    "purpose": "emailVerification" // "emailVerification" | "passwordReset" | "twoStepAuth"
+  }
+  ```
+- **Response (200 OK)**:
+  ```json
+  {
+    "expiresAt": "...",
+    "message": "We sent you an OTP, Check your mail!"
+  }
+  ```
+
+### 8. Forgot Password
+Initiates the password reset flow.
+
+- **Endpoint**: `POST /forgot-password`
+- **Request Body**:
+  ```json
+  {
+    "email": "john.doe@example.com"
+  }
+  ```
+- **Response (200 OK)**:
+  ```json
+  {
+    "expiresAt": "...",
+    "message": "We sent you a password reset code, Check your mail!"
+  }
+  ```
+
+### 9. Reset Password
+Resets the password using OTP.
+
+- **Endpoint**: `POST /reset-password`
+- **Request Body**:
+  ```json
+  {
+    "email": "john.doe@example.com",
+    "otp": "123456",
+    "newPassword": "NewSecurePassword123!"
+  }
+  ```
+- **Response (200 OK)**:
+  ```json
+  {
+    "message": "Password reset successfully"
+  }
+  ```
+
 ---
 
 ## Email & OTP Login Flow
@@ -123,10 +186,10 @@ The API supports an OTP-based verification/login mechanism.
 1.  **Initiation**:
     - **Registration**: Registering triggers an OTP.
     - **Login (Unverified)**: Attempting to login with correct credentials on an unverified account triggers an OTP resend.
-    - **Manual Request**: Authenticated users can request an OTP via `/send-otp` (Implementation pending update for unauthenticated access).
+    - **Manual Request**: Authenticated users or users in the forgot password flow can request an OTP via `/send-otp`.
 
 2.  **Completion**:
-    - The user submits the OTP to `POST /verify-otp` with their email.
-    - On success, the server issues full authentication cookies (`accessToken`, `refreshToken`) and returns the user profile, effectively logging them in.
+    - The user submits the OTP to `POST /verify-account` (for registration) or `POST /reset-password` (for password recovery) with their email.
+    - On success, the server issues full authentication cookies (`accessToken`, `refreshToken`) and returns the user profile, effectively logging them in (for verification).
 
-This allows `verify-otp` to act as a final authentication step.
+This allows `verify-account` to act as a final authentication step for new users.

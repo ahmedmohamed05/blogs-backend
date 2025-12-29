@@ -3,7 +3,7 @@ import { Request, Response } from "express";
 import jwtConfig from "../config/jwt";
 import AuthServices from "../services/auth.services";
 import { OTPPurpose } from "../types/otp.types";
-import { throwDeprecation } from "node:process";
+import { UserVerified } from "../types/auth.types";
 
 export default class AuthController {
 	static async register(req: Request, res: Response) {
@@ -38,7 +38,7 @@ export default class AuthController {
 			res.status(200).json(user);
 		}
 
-		res.status(200).json({ message: "We sent you a mil with your OTP" });
+		res.status(200).json({ message: "We sent you a mail with your OTP" });
 	}
 
 	static async logout(req: Request, res: Response) {
@@ -77,35 +77,54 @@ export default class AuthController {
 	static async verifyAccount(req: Request, res: Response) {
 		const { email, otp } = req.body;
 
-		const { userData } = await AuthServices.verifyOTP(email, otp);
-		const { accessToken, refreshToken, user } = userData;
-
-		const { hashedPassword, id, ...safeUser } = user;
+		const { userInfo } = await AuthServices.verifyAccount(email, otp);
+		const { accessToken, refreshToken, user } = userInfo;
 
 		res.cookie("accessToken", accessToken, jwtConfig.accessCookieOptions);
 		res.cookie("refreshToken", refreshToken, jwtConfig.refreshCookieOptions);
-		res.status(200).json(safeUser);
+		res.status(200).json(user);
 	}
 
 	static async changePassword(req: Request, res: Response) {
 		const { username, currentPassword, newPassword } = req.body;
 
-		const ret = await AuthServices.changePassword(
+		await AuthServices.changePassword(username, currentPassword, newPassword);
+		await AuthServices.logout(req.cookies.refreshToken);
+
+		const { userInfo } = (await AuthServices.login(
 			username,
-			currentPassword,
 			newPassword
-		);
+		)) as UserVerified;
 
-		if (ret.isAccountVerified) {
-			const { accessToken, refreshToken, user } = ret.userInfo;
-			res.cookie("accessToken", accessToken, jwtConfig.accessCookieOptions);
-			res.cookie("refreshToken", refreshToken, jwtConfig.refreshCookieOptions);
-			res.status(200).json(user);
-		}
+		const { accessToken, refreshToken, user } = userInfo;
+		res.cookie("accessToken", accessToken, jwtConfig.accessCookieOptions);
+		res.cookie("refreshToken", refreshToken, jwtConfig.refreshCookieOptions);
+		res.status(200).json(user);
+	}
 
-		throw new ApiError(
-			409,
-			"You can't update your password until you verify your account"
-		);
+	static async forgotPassword(req: Request, res: Response) {
+		const { email } = req.body;
+		const result = await AuthServices.forgotPassword(email);
+		res.status(200).json(result);
+	}
+
+	static async resetPassword(req: Request, res: Response) {
+		const { email, otp, newPassword } = req.body;
+		const result = await AuthServices.resetPassword(email, otp, newPassword);
+		res.status(200).json(result);
 	}
 }
+
+/*
+
+	static async sendOTP(req: Request, res: Response) {
+		const { email, purpose } = req.body;
+		let purposeEnum = OTPPurpose.emailVerification;
+		if (purpose === "passwordReset") purposeEnum = OTPPurpose.passwordReset;
+		else if (purpose === "twoStepAuth") purposeEnum = OTPPurpose.twoStepAuth;
+
+		const result = await AuthServices.sendOTP(email, purposeEnum);
+		res.status(200).json(result);
+	}
+
+*/

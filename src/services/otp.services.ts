@@ -63,6 +63,10 @@ export default class OTPServices {
 		// TODO: Generate OTP based on the purpose
 		const { expiresAt, otp } = await this.generateVerificationOTP_m(email);
 
+		if (process.env.NODE_ENV !== "production") {
+			console.log(`[DEV ONLY] OTP for ${email}: ${otp}`);
+		}
+
 		const expiresAtMinutes = Math.ceil((expiresAt - Date.now()) / 1000 / 60);
 
 		const mailOptions: SendMailOptions = {

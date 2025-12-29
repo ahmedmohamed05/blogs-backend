@@ -1,34 +1,18 @@
 import UserModel from "../models/user.model";
 import ApiError from "../utils/apiError";
 import bcrypt from "bcrypt";
-import { generateTokens, verifyRefreshToken } from "../utils/jwt";
-import ValidRefreshTokenModel from "../models/validRefreshToken.model";
-import { JwtPayload } from "jsonwebtoken";
 import OTPServices from "./otp.services";
-import { User } from "../generated/prisma/client";
 import OTPModel from "../models/otp.model";
 import { OTPPurpose } from "../types/otp.types";
-
-interface UserVerified {
-	isAccountVerified: true;
-	userInfo: {
-		user: Omit<User, "hashedPassword" | "id">;
-		accessToken: string;
-		refreshToken: string;
-	};
-}
-
-interface UserNotVerified {
-	isAccountVerified: false;
-	otpInfo: {
-		expiresAt: number;
-		message: string;
-	};
-}
-
-type AuthResponse = UserVerified | UserNotVerified;
+import {
+	AuthResponse,
+	UserNotVerified,
+	UserVerified,
+} from "../types/auth.types";
+import TokensServices from "./tokesn.services";
 
 export default class AuthServices {
+	// Register unverified new user
 	static async registerNewUser(
 		firstName: string,
 		lastName: string,
@@ -86,14 +70,12 @@ export default class AuthServices {
 		const { id, hashedPassword, ...user } = fullUser;
 
 		if (user.isVerified) {
-			const { accessToken, refreshToken } = generateTokens(fullUser.id);
-			await ValidRefreshTokenModel.store(refreshToken, fullUser.id);
+			const tokens = await TokensServices.generateAndStoreTokens(id);
 
 			return {
 				isAccountVerified: true,
 				userInfo: {
-					accessToken,
-					refreshToken,
+					...tokens,
 					user,
 				},
 			};
@@ -111,16 +93,20 @@ export default class AuthServices {
 	}
 
 	static async logout(refreshToken: string) {
-		const ret = verifyRefreshToken(refreshToken);
-		if (ret) await ValidRefreshTokenModel.delete(refreshToken);
-		return ret;
+		const payload = await TokensServices.decodeToken(refreshToken);
+		if (!payload)
+			throw new ApiError(
+				401,
+				"Unauthorized expired refresh token, Log in again"
+			);
+
+		await TokensServices.deleteRefreshToken(refreshToken);
+		return true;
 	}
 
 	static async refreshTokens(oldRefreshToken: string) {
 		// Add id property to the payload
-		const payload = verifyRefreshToken(oldRefreshToken) as JwtPayload & {
-			userId: number;
-		};
+		const payload = await TokensServices.decodeToken(oldRefreshToken);
 
 		if (!payload)
 			throw new ApiError(
@@ -128,18 +114,10 @@ export default class AuthServices {
 				"Unauthorized expired refresh token, Log in again"
 			);
 
-		// Find and delete the old token from database
-		const oldDBToken = await ValidRefreshTokenModel.find(oldRefreshToken);
+		await TokensServices.deleteRefreshToken(oldRefreshToken);
+		const tokens = await TokensServices.generateAndStoreTokens(payload.userId);
 
-		if (!oldDBToken)
-			throw new ApiError(401, "Invalid refresh token, Log in again");
-
-		ValidRefreshTokenModel.delete(oldRefreshToken);
-
-		const { accessToken, refreshToken } = generateTokens(payload.userId);
-		await ValidRefreshTokenModel.store(refreshToken, payload.userId);
-
-		return { accessToken, refreshToken };
+		return tokens;
 	}
 
 	static async sendOTP(email: string, purpose: OTPPurpose) {
@@ -155,7 +133,10 @@ export default class AuthServices {
 		};
 	}
 
-	static async verifyOTP(email: string, otp: string) {
+	static async verifyAccount(
+		email: string,
+		otp: string
+	): Promise<UserVerified> {
 		const sameOTP = await OTPServices.verifyOTP(email, otp);
 		if (!sameOTP) {
 			throw new ApiError(
@@ -164,23 +145,36 @@ export default class AuthServices {
 			);
 		}
 
-		if (await UserModel.isVerifiedByEmail(email))
-			throw new ApiError(400, "You account already verified!");
+		const isVerified = await UserModel.isVerifiedByEmail(email);
+		if (isVerified) throw new ApiError(400, "You account already verified!");
 
 		const user = await UserModel.verify(email);
 
 		await OTPModel.cleanUserOTPs(email);
 
-		const { accessToken, refreshToken } = generateTokens(user.id);
-		await ValidRefreshTokenModel.store(refreshToken, user.id);
+		const tokens = await TokensServices.generateAndStoreTokens(user.id);
 
 		return {
 			isAccountVerified: true,
-			userData: {
-				accessToken,
-				refreshToken,
+			userInfo: {
+				...tokens,
 				user,
 			},
+		};
+	}
+
+	static async forgotPassword(email: string) {
+		const user = await UserModel.findByEmail(email);
+		if (!user) throw new ApiError(404, "User not found");
+
+		const expiresAt = await OTPServices.generateAndSend(
+			email,
+			OTPPurpose.passwordReset
+		);
+
+		return {
+			expiresAt,
+			message: "We sent you a password reset code, Check your mail!",
 		};
 	}
 
@@ -188,15 +182,18 @@ export default class AuthServices {
 		username: string,
 		currentPassword: string,
 		newPassword: string
-	): Promise<UserVerified> {
-		const user = await UserModel.findByUsername(username);
+	) {
+		const isVerified = await UserModel.isVerifiedByUsername(username);
+		if (!isVerified) throw new ApiError(400, "Please verify your account");
 
-		if (!user)
+		const fullUser = await UserModel.findByUsername(username);
+
+		if (!fullUser)
 			throw new ApiError(404, "User not found, you can't change such password");
 
 		const sameOldPassword = await bcrypt.compare(
 			currentPassword,
-			user.hashedPassword
+			fullUser.hashedPassword
 		);
 
 		if (!sameOldPassword)
@@ -214,21 +211,26 @@ export default class AuthServices {
 		if (!updatedUser)
 			throw new ApiError(
 				400,
-				"something wen't wrong while updating your password"
+				"something went wrong while updating your password"
 			);
 
-		const { id, hashedPassword, ...safeUser } = updatedUser;
+		return true;
+	}
 
-		const { accessToken, refreshToken } = generateTokens(updatedUser.id);
-		await ValidRefreshTokenModel.store(refreshToken, updatedUser.id);
+	static async resetPassword(email: string, otp: string, newPassword: string) {
+		const sameOTP = await OTPServices.verifyOTP(email, otp);
+		if (!sameOTP) throw new ApiError(400, "Invalid or expired OTP");
 
-		return {
-			isAccountVerified: true,
-			userInfo: {
-				accessToken,
-				refreshToken,
-				user,
-			},
-		};
+		const newHashedPassword = await bcrypt.hash(newPassword, 10);
+
+		const user = await UserModel.findByEmail(email);
+		if (!user) throw new ApiError(404, "User not found");
+
+		await UserModel.updatePassword(user.username, newHashedPassword);
+
+		// Clean up OTPs
+		await OTPModel.cleanUserOTPs(email);
+
+		return { message: "Password reset successfully" };
 	}
 }
