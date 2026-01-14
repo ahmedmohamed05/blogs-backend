@@ -11,7 +11,8 @@ export default class TokensServices {
 	}
 
 	static async deleteRefreshToken(refreshToken: string): Promise<void> {
-		await ValidRefreshTokenModel.delete(refreshToken);
+		const token = await ValidRefreshTokenModel.delete(refreshToken);
+    console.log(token);
 	}
 
 	static async checkToken(refreshToken: string): Promise<boolean> {
